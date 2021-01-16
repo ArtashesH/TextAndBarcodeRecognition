@@ -1,0 +1,251 @@
+#include "imageshowdemo.h"
+#include "textregionextrator.h"
+#include "OptionWidget.h"
+
+#include <cmath>
+
+#include <QGraphicsView>
+#include <QGraphicsPixmapItem>
+#include <QGraphicsRectItem>
+#include <QPushButton>
+#include <QGridLayout>
+#include <QDebug>
+#include <QTimer>
+#include <QString>
+#include <QFileDialog>
+#include <QSlider>
+#include <QTableWidget>
+#include <QRadioButton>
+#include <opencv2/opencv.hpp>
+#include <QMessageBox>
+
+#include <time.h>
+#include <fstream>
+
+ImageShowDemo::ImageShowDemo(QWidget *parent) :
+QWidget(parent)
+
+{
+	createMembers();
+	setupLayout();
+	makeConnections();
+	resize(1000, 600);
+}
+
+void  ImageShowDemo::createMembers()
+{
+	m_optionWidget = new OptionWidget();
+	m_textRegionExtractor = new TextRegionExtractor;
+	m_graphicsViewImage = new QGraphicsView;
+	m_graphicsViewText = new QGraphicsView;
+
+	m_scenImage = new QGraphicsScene;
+	m_scen_text = new QGraphicsScene;
+	m_timer = new QTimer;
+	m_pushButtonStart_Stop = new QPushButton("Recognize");
+	m_pushButtonOpenImage = new  QPushButton("Choose image");
+	m_pushButtonOpenImage->setFixedSize(100, 30);
+	m_pushButtonOpenTextFile = new QPushButton("Choose file");
+	m_pushButtonOpenTextFile->setFixedSize(100, 30);
+	//m_optionWidget->setFixedHeight(150);
+	m_graphicsViewText->setStyleSheet("background-color: white;");
+	//m_optionWidget->show();
+}
+
+
+
+void  ImageShowDemo::setupLayout()
+{
+	QGridLayout * glayout = new QGridLayout(this);
+	glayout->addWidget(m_pushButtonOpenImage, 0, 2, 1, 1);
+	glayout->addWidget(m_graphicsViewText, 0, 1, 2, 2);
+	glayout->addWidget(m_graphicsViewImage, 1, 2, 1, 1);
+	glayout->addWidget(m_graphicsViewText, 1, 3, 1, 1);
+	glayout->addWidget(m_pushButtonStart_Stop, 2, 2, 1, 2);
+	//glayout->addWidget(m_optionWidget,3,2,1,3);
+	m_graphicsViewImage->setScene(m_scenImage);
+	m_graphicsViewText->setScene(m_scen_text);
+	m_graphicsViewText->resize(m_graphicsViewImage->size());
+	setLayout(glayout);
+}
+
+void  ImageShowDemo::makeConnections()
+{
+	connect(m_timer, SIGNAL(timeout()), this, SLOT(testImageCapture()));
+	connect(m_pushButtonStart_Stop, SIGNAL(clicked()), this, SLOT(onPushButtonStart_Stop()));
+	connect(m_pushButtonOpenImage, SIGNAL(clicked()), this, SLOT(onPushbuttonOpenImage()));
+	connect(m_pushButtonOpenTextFile, SIGNAL(clicked()), this, SLOT(onPushbuttonOpenTextFile()));
+}
+
+cv::Mat ImageShowDemo::rotateImageWithAngle(const int angle, const cv::Mat& initImg)
+{
+	//cv::imshow("aaaa", m_clone);
+	//cv::waitKey(0);
+	cv::Mat m_clone = initImg.clone();
+	static int ang = -5;
+	cv::Point2f center(m_clone.cols / 2.0, m_clone.rows / 2.0);
+	cv::Mat rot = cv::getRotationMatrix2D(center, angle, 1.0);
+	// determine bounding rectangle
+	unsigned rect_angle = 5;
+	if (angle <= -10) {
+		rect_angle = 0;
+	}
+	cv::Rect bbox = cv::RotatedRect(center, m_clone.size(), rect_angle).boundingRect();
+
+	// adjust transformation matrix
+	rot.at<double>(0, 2) += bbox.width / 2.0 - center.x;
+	rot.at<double>(1, 2) += bbox.height / 2.0 - center.y;
+
+	cv::warpAffine(m_clone, m_clone, rot, bbox.size());
+	ang -= 5;
+	cv::imwrite("robot.png", m_clone);
+	return m_clone;
+}
+
+void ImageShowDemo::testImageCapture()
+{
+	if (!m_imageCapture.isOpened()) {
+		std::cout << "Video capture is not valid \n";
+		exit(1);
+	}
+	cv::Mat frame = m_image;
+
+	//m_videoCapture >> frame>>frame;
+
+	if (frame.empty()) {
+		m_timer->stop();
+
+		return;
+	}
+	//frame = ~frame;
+	static int i = 0;
+
+	m_textRegionExtractor->setFrame(frame);
+
+
+	QPixmap p = QPixmap::fromImage(QImage((uchar*)frame.data, frame.cols, frame.rows, frame.step1(), QImage::Format_RGB888));
+	m_scenImage->clear();
+	m_scenImage->addPixmap(p);
+
+	/*TextRegionExtractor::Options* opt = NULL;
+	opt = m_optionWidget->getActiveOptions();
+
+	TextRegionExtractor::RectTextInfo r = m_textRegionExtractor->run(*opt);
+	graphicsText(r);*/
+
+}
+
+void ImageShowDemo::onPushButtonStart_Stop()
+{
+	//if (m_pushButtonStart_Stop->text() == "START"){
+	//	//m_optionWidget->onPureTesseract();
+	//	m_timer->start(30);
+	//	m_pushButtonStart_Stop->setStyleSheet("QPushButton {background-color: #48D1CC; color: red;}");
+	//	m_pushButtonStart_Stop->setText("STOP");
+	//	return;
+	//}
+	//if (m_pushButtonStart_Stop->text() == "STOP"){
+	//	m_timer->stop();
+	//	m_pushButtonStart_Stop->setStyleSheet("QPushButton {background-color: #48D1CC; color: blue;}");
+	//	m_pushButtonStart_Stop->setText("START");
+	//}
+
+	if (m_image.empty()) {
+		QMessageBox::StandardButton message;
+		message = QMessageBox::warning(this, "Warning", "Please choose image!!!", QMessageBox::Ok);
+		return;
+	}
+
+	m_pushButtonStart_Stop->setStyleSheet("QPushButton {background-color: #48D1CC; color: red;}");
+
+	TextRegionExtractor::Options* opt = NULL;
+	opt = m_optionWidget->getActiveOptions();
+
+	TextRegionExtractor::RectTextInfo r = m_textRegionExtractor->run(*opt);
+	graphicsText(r);
+}
+
+void ImageShowDemo::graphicsText(TextRegionExtractor::RectTextInfo rt)
+{
+	QRect posrect;
+	QPen pen(Qt::green, 2, Qt::SolidLine, Qt::MPenCapStyle, Qt::MPenJoinStyle);
+	m_scen_text->clear();
+
+	std::ofstream outText;
+	time_t  timev;
+	time(&timev);
+	outText.open("E:\\Projects\\TextRecognitionVs2015\\x64\\Release\\ImageWithText\\RecognizedTexts\\text - "+ std::to_string(timev) +".txt");
+
+	for (int i = 0; i < rt.size(); ++i){
+		posrect = QRect(rt.at(i).first.x, rt.at(i).first.y, rt.at(i).first.width, rt.at(i).first.height);
+		QString text = QString::fromStdString(rt.at(i).second);
+		outText << text.toUtf8().constData();
+		QPixmap pixmap = getStringImg(text, posrect);
+		QGraphicsPixmapItem* item1 = new QGraphicsPixmapItem(pixmap);
+		item1->setPos(posrect.x(), posrect.y());
+		m_scen_text->addItem(item1);
+		m_scenImage->addRect(posrect, pen);
+	}
+	outText.close();
+}
+
+void ImageShowDemo::onPushbuttonOpenImage()
+{
+	static bool isCheckedOpenImage = false;
+	imgFilename = QFileDialog::getOpenFileName(
+		this,
+		tr("Open image"),
+		"E:\\Projects\\TextRecognitionVs2015\\x64\\Release\\ImageWithText",
+		"Image files (*.jpg *.tiff *.png *.jpeg)");
+	if (isCheckedOpenImage) {
+		m_pushButtonStart_Stop->setStyleSheet("QPushButton {background-color: white; color: black;}");
+	}
+
+	if (imgFilename.isEmpty()) {
+		return;
+	}
+	m_imagePath = imgFilename.toStdString();
+	m_image = cv::imread(m_imagePath);
+	//m_image = rotateImageWithAngle(-7, m_image);
+	m_imageCapture.open(m_imagePath);
+
+	m_timer->start(30);
+	isCheckedOpenImage = true;
+}
+
+void ImageShowDemo::onPushbuttonOpenTextFile() {
+	txtFilename = QFileDialog::getOpenFileName(
+		this,
+		tr("Text file"),
+		"E:\\Projects\\TextRecognitionVs2015\\x64\\Release\\ImageWithText",
+		"Text files (*.txt)");
+
+	if (txtFilename.isEmpty()) {
+		return;
+	}
+	m_textFilePath = txtFilename.toStdString();
+}
+
+QPixmap ImageShowDemo::getStringImg(const QString& str, const QRect& rect)
+{
+	QString qStr = str;
+	QStringList qStrList = qStr.split("\n");
+	int maxLength = qStrList.at(0).length();
+	for (int i = 0; i < qStrList.size(); ++i) {
+		if (qStrList.at(i).length() > maxLength) {
+			maxLength = qStrList.at(i).length();
+		}
+	}
+
+	QFont font("times", rect.width() / maxLength);
+	QPixmap pixmap(rect.width() +4, rect.height()+4 );
+	pixmap.fill(QColor(255, 255, 255, 255));
+	QPainter painter(&pixmap);
+	QPen pen(QColor(255, 0, 0, 255));
+	painter.setPen(pen);
+	painter.setFont(font);
+	painter.drawText(pixmap.rect(), Qt::AlignHCenter, qStr, &pixmap.rect());
+
+	return pixmap;
+}
+
